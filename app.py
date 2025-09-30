@@ -419,10 +419,12 @@ class AsthmaGuardianV3Stack(Stack):
             self,
             "WebsiteDistribution",
             default_behavior=cloudfront.BehaviorOptions(
-                origin=origins.S3StaticWebsiteOrigin(self.website_bucket),
+                origin=origins.S3BucketOrigin(self.website_bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
-                compress=True
+                compress=True,
+                allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD_OPTIONS
             ),
             additional_behaviors={
                 "/api/*": cloudfront.BehaviorOptions(
@@ -430,10 +432,25 @@ class AsthmaGuardianV3Stack(Stack):
                         f"{self.api.rest_api_id}.execute-api.{self.region}.amazonaws.com"
                     ),
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
-                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
+                    cached_methods=cloudfront.CachedMethods.CACHE_GET_HEAD
                 )
             },
-            price_class=cloudfront.PriceClass.PRICE_CLASS_100
+            price_class=cloudfront.PriceClass.PRICE_CLASS_100,
+            default_root_object="index.html",
+            error_responses=[
+                cloudfront.ErrorResponse(
+                    http_status=404,
+                    response_http_status=200,
+                    response_page_path="/index.html"
+                ),
+                cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=200,
+                    response_page_path="/index.html"
+                )
+            ]
         )
         
         # Create CloudWatch log groups
