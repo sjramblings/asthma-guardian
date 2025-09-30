@@ -1,0 +1,35 @@
+{
+  "name": "asthma-guardian-v3",
+  "version": "1.0.0",
+  "description": "Asthma Guardian v3 CDK Infrastructure",
+  "main": "index.js",
+  "scripts": {
+    "build": "cdk synth",
+    "deploy": "cdk deploy --all",
+    "destroy": "cdk destroy --all",
+    "diff": "cdk diff",
+    "list": "cdk list",
+    "test": "pytest",
+    "lint": "flake8 .",
+    "format": "black .",
+    "type-check": "mypy ."
+  },
+  "keywords": [
+    "aws",
+    "cdk",
+    "asthma",
+    "air-quality",
+    "health"
+  ],
+  "author": "Asthma Guardian Team",
+  "license": "MIT",
+  "devDependencies": {
+    "aws-cdk": "^2.100.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.100.0",
+    "constructs": "^10.0.0"
+  }
+}

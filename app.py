@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""
+Asthma Guardian v3 CDK Application - Simplified Version
+"""
+
+import os
+from aws_cdk import (
+    App, Environment, Stack,
+    aws_s3 as s3,
+    aws_cloudfront as cloudfront,
+    aws_cloudfront_origins as origins,
+    aws_apigateway as apigateway,
+    aws_lambda as lambda_,
+    aws_dynamodb as dynamodb,
+    aws_iam as iam,
+    aws_kms as kms,
+    aws_ec2 as ec2,
+    aws_logs as logs,
+    aws_cloudwatch as cloudwatch,
+    aws_sns as sns,
+    CfnOutput,
+    RemovalPolicy,
+    Duration
+)
+from constructs import Construct
+
+
+class AsthmaGuardianV3Stack(Stack):
+    """Main stack for Asthma Guardian v3 infrastructure."""
+    
+    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+        
+        # Create KMS key for encryption
+        self.kms_key = kms.Key(
+            self,
+            "EncryptionKey",
+            description="KMS key for Asthma Guardian v3",
+            enable_key_rotation=True,
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        # Create VPC
+        self.vpc = ec2.Vpc(
+            self,
+            "VPC",
+            vpc_name="asthma-guardian-v3-vpc",
+            max_azs=2,
+            nat_gateways=1,
+            subnet_configuration=[
+                ec2.SubnetConfiguration(
+                    name="Public",
+                    subnet_type=ec2.SubnetType.PUBLIC,
+                    cidr_mask=24
+                ),
+                ec2.SubnetConfiguration(
+                    name="Private",
+                    subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    cidr_mask=24
+                )
+            ]
+        )
+        
+        # Create DynamoDB tables
+        self.users_table = dynamodb.Table(
+            self,
+            "UsersTable",
+            table_name="asthma-guardian-users",
+            partition_key=dynamodb.Attribute(
+                name="PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        self.air_quality_table = dynamodb.Table(
+            self,
+            "AirQualityTable",
+            table_name="asthma-guardian-air-quality",
+            partition_key=dynamodb.Attribute(
+                name="PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            time_to_live_attribute="ttl",
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        # Create Lambda execution role
+        self.lambda_execution_role = iam.Role(
+            self,
+            "LambdaExecutionRole",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaVPCAccessExecutionRole")
+            ]
+        )
+        
+        # Create Lambda functions
+        self.air_quality_lambda = lambda_.Function(
+            self,
+            "AirQualityLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="air_quality.handler",
+            code=lambda_.Code.from_inline("""
+def handler(event, context):
+    return {
+        'statusCode': 200,
+        'headers': {'Content-Type': 'application/json'},
+        'body': '{"message": "Air quality API endpoint"}'
+    }
+            """),
+            environment={
+                "ENVIRONMENT": "dev",
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian"
+            },
+            timeout=Duration.seconds(30),
+            role=self.lambda_execution_role
+        )
+        
+        # Create API Gateway
+        self.api = apigateway.RestApi(
+            self,
+            "ApiGateway",
+            rest_api_name="asthma-guardian-v3-api",
+            description="API Gateway for Asthma Guardian v3",
+            default_cors_preflight_options=apigateway.CorsOptions(
+                allow_origins=apigateway.Cors.ALL_ORIGINS,
+                allow_methods=apigateway.Cors.ALL_METHODS,
+                allow_headers=["Content-Type", "Authorization"]
+            ),
+            deploy_options=apigateway.StageOptions(
+                stage_name="prod",
+                throttling_rate_limit=1000,
+                throttling_burst_limit=2000
+            )
+        )
+        
+        # Add API routes
+        air_quality_integration = apigateway.LambdaIntegration(
+            self.air_quality_lambda,
+            request_templates={"application/json": '{"statusCode": "200"}'}
+        )
+        
+        air_quality = self.api.root.add_resource("api").add_resource("air-quality")
+        air_quality.add_method("GET", air_quality_integration)
+        
+        # Create S3 bucket for website hosting
+        self.website_bucket = s3.Bucket(
+            self,
+            "WebsiteBucket",
+            bucket_name="asthma-guardian-v3-website",
+            website_index_document="index.html",
+            website_error_document="error.html",
+            public_read_access=False,
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True
+        )
+        
+        # Create CloudFront distribution
+        self.distribution = cloudfront.Distribution(
+            self,
+            "WebsiteDistribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=origins.S3StaticWebsiteOrigin(self.website_bucket),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                compress=True
+            ),
+            additional_behaviors={
+                "/api/*": cloudfront.BehaviorOptions(
+                    origin=origins.HttpOrigin(
+                        f"{self.api.rest_api_id}.execute-api.{self.region}.amazonaws.com"
+                    ),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                )
+            },
+            price_class=cloudfront.PriceClass.PRICE_CLASS_100
+        )
+        
+        # Create CloudWatch log groups
+        self.api_log_group = logs.LogGroup(
+            self,
+            "ApiLogGroup",
+            log_group_name="/aws/apigateway/asthma-guardian-v3-api",
+            retention=logs.RetentionDays.ONE_MONTH
+        )
+        
+        # Create SNS topic for alerts
+        self.alerts_topic = sns.Topic(
+            self,
+            "AlertsTopic",
+            topic_name="asthma-guardian-v3-alerts",
+            display_name="Asthma Guardian v3 Alerts"
+        )
+        
+        # Create CloudWatch dashboard
+        self.dashboard = cloudwatch.Dashboard(
+            self,
+            "MonitoringDashboard",
+            dashboard_name="asthma-guardian-v3"
+        )
+        
+        # Add widgets to dashboard
+        self.dashboard.add_widgets(
+            cloudwatch.GraphWidget(
+                title="API Gateway Metrics",
+                left=[
+                    cloudwatch.Metric(
+                        namespace="AWS/ApiGateway",
+                        metric_name="Count",
+                        dimensions_map={"ApiName": "asthma-guardian-v3-api"}
+                    )
+                ],
+                width=12,
+                height=6
+            )
+        )
+        
+        # Outputs
+        CfnOutput(
+            self,
+            "ApiGatewayUrl",
+            value=self.api.url,
+            description="API Gateway URL"
+        )
+        
+        CfnOutput(
+            self,
+            "CloudFrontDomainName",
+            value=self.distribution.domain_name,
+            description="CloudFront distribution domain name"
+        )
+        
+        CfnOutput(
+            self,
+            "WebsiteBucketName",
+            value=self.website_bucket.bucket_name,
+            description="Name of the S3 bucket for website hosting"
+        )
+
+
+def main():
+    """Main CDK application entry point."""
+    app = App()
+    
+    # Get environment variables
+    env_name = os.getenv('ENVIRONMENT', 'dev')
+    aws_account = os.getenv('AWS_ACCOUNT_ID')
+    aws_region = os.getenv('AWS_REGION', 'ap-southeast-2')
+    
+    # Create environment object
+    env = Environment(account=aws_account, region=aws_region)
+    
+    # Create main stack
+    AsthmaGuardianV3Stack(
+        app,
+        f"AsthmaGuardianV3-{env_name}",
+        env=env
+    )
+    
+    # Add tags to all resources
+    app.node.add_metadata("cdk:tags", {
+        "Project": "AsthmaGuardianV3",
+        "Environment": env_name,
+        "ManagedBy": "CDK"
+    })
+    
+    app.synth()
+
+
+if __name__ == "__main__":
+    main()
