@@ -241,12 +241,12 @@ Configure API Gateway with proper routing, authentication, CORS settings, and ra
 Implement air quality API endpoints for current and historical data retrieval based on API contracts.
 
 **Acceptance Criteria:**
-- [ ] GET /api/air-quality/current endpoint implemented
-- [ ] GET /api/air-quality/history endpoint implemented
-- [ ] Proper error handling and validation
-- [ ] Response format matches API contracts
-- [ ] Integration with DynamoDB tables
-- [ ] Performance optimization implemented
+- [x] GET /api/air-quality/current endpoint implemented
+- [x] GET /api/air-quality/history endpoint implemented
+- [x] Proper error handling and validation
+- [x] Response format matches API contracts
+- [x] Integration with DynamoDB tables
+- [x] Performance optimization implemented
 
 **Technical Requirements:**
 - **Dependencies:** T003, T004
@@ -293,12 +293,12 @@ Implement air quality API endpoints for current and historical data retrieval ba
 Implement user profile API endpoints for profile retrieval and updates based on API contracts.
 
 **Acceptance Criteria:**
-- [ ] GET /api/users/profile endpoint implemented
-- [ ] PUT /api/users/profile endpoint implemented
-- [ ] Proper authentication and authorization
-- [ ] Data validation and sanitization
-- [ ] Response format matches API contracts
-- [ ] Integration with DynamoDB tables
+- [x] GET /api/users/profile endpoint implemented
+- [x] PUT /api/users/profile endpoint implemented
+- [x] Proper authentication and authorization
+- [x] Data validation and sanitization
+- [x] Response format matches API contracts
+- [x] Integration with DynamoDB tables
 
 **Technical Requirements:**
 - **Dependencies:** T003, T004
@@ -345,12 +345,12 @@ Implement user profile API endpoints for profile retrieval and updates based on 
 Implement guidance API endpoints for personalized recommendations using AWS Bedrock AgentCore.
 
 **Acceptance Criteria:**
-- [ ] GET /api/guidance/recommendations endpoint implemented
-- [ ] AWS Bedrock AgentCore integration
-- [ ] Personalized recommendation generation
-- [ ] Response format matches API contracts
-- [ ] Integration with user profiles and air quality data
-- [ ] Performance optimization implemented
+- [x] GET /api/guidance/recommendations endpoint implemented
+- [x] AWS Bedrock AgentCore integration
+- [x] Personalized recommendation generation
+- [x] Response format matches API contracts
+- [x] Integration with user profiles and air quality data
+- [x] Performance optimization implemented
 
 **Technical Requirements:**
 - **Dependencies:** T003, T004
@@ -397,12 +397,12 @@ Implement guidance API endpoints for personalized recommendations using AWS Bedr
 Implement notification API endpoints for subscription management and notification history.
 
 **Acceptance Criteria:**
-- [ ] POST /api/notifications/subscribe endpoint implemented
-- [ ] GET /api/notifications/history endpoint implemented
-- [ ] Proper validation and error handling
-- [ ] Response format matches API contracts
-- [ ] Integration with DynamoDB tables
-- [ ] SNS integration for notifications
+- [x] POST /api/notifications/subscribe endpoint implemented
+- [x] GET /api/notifications/history endpoint implemented
+- [x] Proper validation and error handling
+- [x] Response format matches API contracts
+- [x] Integration with DynamoDB tables
+- [x] SNS integration for notifications
 
 **Technical Requirements:**
 - **Dependencies:** T003, T004
@@ -505,12 +505,12 @@ Create React frontend application with TypeScript that integrates with all API e
 Implement data ingestion service for NSW Government air quality feeds.
 
 **Acceptance Criteria:**
-- [ ] NSW Government API integration
-- [ ] Data validation and normalization
-- [ ] DynamoDB storage implementation
-- [ ] Error handling and retry logic
-- [ ] Scheduled data updates
-- [ ] Data quality monitoring
+- [x] NSW Government API integration
+- [x] Data validation and normalization
+- [x] DynamoDB storage implementation
+- [x] Error handling and retry logic
+- [x] Scheduled data updates
+- [x] Data quality monitoring
 
 **Technical Requirements:**
 - **Dependencies:** T003

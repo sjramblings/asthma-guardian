@@ -18,6 +18,8 @@ from aws_cdk import (
     aws_logs as logs,
     aws_cloudwatch as cloudwatch,
     aws_sns as sns,
+    aws_events as events,
+    aws_events_targets as targets,
     CfnOutput,
     RemovalPolicy,
     Duration
@@ -103,6 +105,76 @@ class AsthmaGuardianV3Stack(Stack):
             removal_policy=RemovalPolicy.DESTROY
         )
         
+        # Guidance Recommendations table
+        self.guidance_table = dynamodb.Table(
+            self,
+            "GuidanceTable",
+            table_name="asthma-guardian-guidance",
+            partition_key=dynamodb.Attribute(
+                name="PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            time_to_live_attribute="ttl",
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        # Add GSI for location-based queries
+        self.guidance_table.add_global_secondary_index(
+            index_name="LocationIndex",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK",
+                type=dynamodb.AttributeType.STRING
+            )
+        )
+        
+        # User Alerts table
+        self.user_alerts_table = dynamodb.Table(
+            self,
+            "UserAlertsTable",
+            table_name="asthma-guardian-user-alerts",
+            partition_key=dynamodb.Attribute(
+                name="PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="SK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            point_in_time_recovery_specification=dynamodb.PointInTimeRecoverySpecification(
+                point_in_time_recovery_enabled=True
+            ),
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            time_to_live_attribute="ttl",
+            removal_policy=RemovalPolicy.DESTROY
+        )
+        
+        # Add GSI for status-based queries
+        self.user_alerts_table.add_global_secondary_index(
+            index_name="StatusIndex",
+            partition_key=dynamodb.Attribute(
+                name="GSI1PK",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="GSI1SK",
+                type=dynamodb.AttributeType.STRING
+            )
+        )
+        
         # Create Lambda execution role
         self.lambda_execution_role = iam.Role(
             self,
@@ -111,7 +183,62 @@ class AsthmaGuardianV3Stack(Stack):
             managed_policies=[
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaVPCAccessExecutionRole")
-            ]
+            ],
+            inline_policies={
+                "DynamoDBAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "dynamodb:GetItem",
+                                "dynamodb:PutItem",
+                                "dynamodb:UpdateItem",
+                                "dynamodb:DeleteItem",
+                                "dynamodb:Query",
+                                "dynamodb:Scan"
+                            ],
+                            resources=[
+                                self.users_table.table_arn,
+                                self.air_quality_table.table_arn,
+                                self.guidance_table.table_arn,
+                                self.user_alerts_table.table_arn
+                            ]
+                        )
+                    ]
+                ),
+                "BedrockAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "bedrock:InvokeModel",
+                                "bedrock:InvokeModelWithResponseStream"
+                            ],
+                            resources=["*"]
+                        )
+                    ]
+                ),
+                "NotificationAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "sns:Publish",
+                                "sns:GetTopicAttributes"
+                            ],
+                            resources=["*"]
+                        ),
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "ses:SendEmail",
+                                "ses:SendRawEmail"
+                            ],
+                            resources=["*"]
+                        )
+                    ]
+                )
+            }
         )
         
         # Create Lambda functions
@@ -119,20 +246,80 @@ class AsthmaGuardianV3Stack(Stack):
             self,
             "AirQualityLambda",
             runtime=lambda_.Runtime.PYTHON_3_12,
-            handler="air_quality.handler",
-            code=lambda_.Code.from_inline("""
-def handler(event, context):
-    return {
-        'statusCode': 200,
-        'headers': {'Content-Type': 'application/json'},
-        'body': '{"message": "Air quality API endpoint"}'
-    }
-            """),
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("backend/lambda_functions/air_quality"),
             environment={
                 "ENVIRONMENT": "dev",
-                "DYNAMODB_TABLE_PREFIX": "asthma-guardian"
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian",
+                "AIR_QUALITY_TABLE_NAME": self.air_quality_table.table_name
             },
             timeout=Duration.seconds(30),
+            role=self.lambda_execution_role
+        )
+        
+        self.user_profile_lambda = lambda_.Function(
+            self,
+            "UserProfileLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("backend/lambda_functions/user_profile"),
+            environment={
+                "ENVIRONMENT": "dev",
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian",
+                "USERS_TABLE_NAME": self.users_table.table_name
+            },
+            timeout=Duration.seconds(30),
+            role=self.lambda_execution_role
+        )
+        
+        self.guidance_lambda = lambda_.Function(
+            self,
+            "GuidanceLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("backend/lambda_functions/guidance"),
+            environment={
+                "ENVIRONMENT": "dev",
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian",
+                "USERS_TABLE_NAME": self.users_table.table_name,
+                "AIR_QUALITY_TABLE_NAME": self.air_quality_table.table_name,
+                "GUIDANCE_TABLE_NAME": self.guidance_table.table_name
+            },
+            timeout=Duration.seconds(60),  # Longer timeout for Bedrock calls
+            role=self.lambda_execution_role
+        )
+        
+        self.notifications_lambda = lambda_.Function(
+            self,
+            "NotificationsLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("backend/lambda_functions/notifications"),
+            environment={
+                "ENVIRONMENT": "dev",
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian",
+                "USERS_TABLE_NAME": self.users_table.table_name,
+                "USER_ALERTS_TABLE_NAME": self.user_alerts_table.table_name,
+                "SES_FROM_EMAIL": "noreply@asthmaguardian.nsw.gov.au"
+            },
+            timeout=Duration.seconds(30),
+            role=self.lambda_execution_role
+        )
+        
+        self.data_ingestion_lambda = lambda_.Function(
+            self,
+            "DataIngestionLambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="handler.handler",
+            code=lambda_.Code.from_asset("backend/lambda_functions/data_ingestion"),
+            environment={
+                "ENVIRONMENT": "dev",
+                "DYNAMODB_TABLE_PREFIX": "asthma-guardian",
+                "AIR_QUALITY_TABLE_NAME": self.air_quality_table.table_name,
+                "NSW_AIR_QUALITY_API_URL": "https://api.airquality.nsw.gov.au",
+                "BOM_API_URL": "https://api.bom.gov.au"
+            },
+            timeout=Duration.seconds(300),  # 5 minutes for data ingestion
             role=self.lambda_execution_role
         )
         
@@ -160,8 +347,59 @@ def handler(event, context):
             request_templates={"application/json": '{"statusCode": "200"}'}
         )
         
-        air_quality = self.api.root.add_resource("api").add_resource("air-quality")
-        air_quality.add_method("GET", air_quality_integration)
+        user_profile_integration = apigateway.LambdaIntegration(
+            self.user_profile_lambda,
+            request_templates={"application/json": '{"statusCode": "200"}'}
+        )
+        
+        guidance_integration = apigateway.LambdaIntegration(
+            self.guidance_lambda,
+            request_templates={"application/json": '{"statusCode": "200"}'}
+        )
+        
+        notifications_integration = apigateway.LambdaIntegration(
+            self.notifications_lambda,
+            request_templates={"application/json": '{"statusCode": "200"}'}
+        )
+        
+        # Create API resource once
+        api_resource = self.api.root.add_resource("api")
+        
+        # Air Quality API endpoints
+        air_quality = api_resource.add_resource("air-quality")
+        air_quality.add_method("GET", air_quality_integration)  # /api/air-quality/current
+        
+        # Add forecast and history endpoints
+        forecast = air_quality.add_resource("forecast")
+        forecast.add_method("GET", air_quality_integration)
+        
+        history = air_quality.add_resource("history")
+        history.add_method("GET", air_quality_integration)
+        
+        # User Profile API endpoints
+        users = api_resource.add_resource("users")
+        users.add_method("POST", user_profile_integration)  # /api/users
+        
+        user = users.add_resource("{user_id}")
+        user.add_method("GET", user_profile_integration)    # /api/users/{user_id}
+        user.add_method("PUT", user_profile_integration)    # /api/users/{user_id}
+        
+        # Guidance API endpoints
+        guidance = api_resource.add_resource("guidance")
+        guidance.add_method("POST", guidance_integration)   # /api/guidance
+        
+        user_guidance = guidance.add_resource("{user_id}")
+        user_guidance.add_method("GET", guidance_integration)  # /api/guidance/{user_id}
+        
+        # Notification API endpoints
+        notifications = api_resource.add_resource("notifications")
+        notifications.add_method("POST", notifications_integration)  # /api/notifications
+        
+        user_notifications = notifications.add_resource("{user_id}")
+        user_notifications.add_method("GET", notifications_integration)  # /api/notifications/{user_id}
+        
+        notification_preferences = notifications.add_resource("preferences").add_resource("{user_id}")
+        notification_preferences.add_method("PUT", notifications_integration)  # /api/notifications/preferences/{user_id}
         
         # Create S3 bucket for website hosting
         self.website_bucket = s3.Bucket(
@@ -235,6 +473,19 @@ def handler(event, context):
                 width=12,
                 height=6
             )
+        )
+        
+        # Create EventBridge rule for scheduled data ingestion
+        self.data_ingestion_rule = events.Rule(
+            self,
+            "DataIngestionRule",
+            description="Trigger data ingestion every hour",
+            schedule=events.Schedule.rate(Duration.hours(1))
+        )
+        
+        # Add Lambda function as target
+        self.data_ingestion_rule.add_target(
+            targets.LambdaFunction(self.data_ingestion_lambda)
         )
         
         # Outputs
