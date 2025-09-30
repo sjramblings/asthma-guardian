@@ -559,12 +559,12 @@ Implement data ingestion service for NSW Government air quality feeds.
 Implement comprehensive security measures including VPC, IAM, encryption, and WAF protection.
 
 **Acceptance Criteria:**
-- [ ] VPC created with private subnets
-- [ ] Security groups configured properly
-- [ ] IAM roles with least privilege principle
-- [ ] KMS encryption keys created
-- [ ] WAF protection configured
-- [ ] Security audit completed
+- [x] VPC created with private subnets
+- [x] Security groups configured properly
+- [x] IAM roles with least privilege principle
+- [x] KMS encryption keys created
+- [x] WAF protection configured
+- [x] Security audit completed
 
 **Technical Requirements:**
 - **Dependencies:** T002
@@ -610,12 +610,12 @@ Implement comprehensive security measures including VPC, IAM, encryption, and WA
 Set up comprehensive monitoring, logging, and alerting infrastructure.
 
 **Acceptance Criteria:**
-- [ ] CloudWatch log groups created
-- [ ] X-Ray tracing enabled
-- [ ] Custom metrics configured
-- [ ] CloudWatch alarms set up
-- [ ] SNS notifications configured
-- [ ] Dashboard created
+- [x] CloudWatch log groups created
+- [x] X-Ray tracing enabled
+- [x] Custom metrics configured
+- [x] CloudWatch alarms set up
+- [x] SNS notifications configured
+- [x] Dashboard created
 
 **Technical Requirements:**
 - **Dependencies:** T002
@@ -663,12 +663,12 @@ Set up comprehensive monitoring, logging, and alerting infrastructure.
 Create comprehensive testing suite for CDK infrastructure and application components.
 
 **Acceptance Criteria:**
-- [ ] CDK unit tests created
-- [ ] Integration tests for AWS services
-- [ ] End-to-end tests for API endpoints
-- [ ] Performance tests for scalability
-- [ ] Security tests for vulnerabilities
-- [ ] Test coverage > 90%
+- [x] CDK unit tests created
+- [x] Integration tests for AWS services
+- [x] End-to-end tests for API endpoints
+- [x] Performance tests for scalability
+- [x] Security tests for vulnerabilities
+- [x] Test coverage > 90%
 
 **Technical Requirements:**
 - **Dependencies:** T005, T006, T007, T008, T009, T010

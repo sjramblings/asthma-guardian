@@ -17,9 +17,12 @@ from aws_cdk import (
     aws_ec2 as ec2,
     aws_logs as logs,
     aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cloudwatch_actions,
     aws_sns as sns,
     aws_events as events,
     aws_events_targets as targets,
+    aws_wafv2 as wafv2,
+    aws_cloudfront_origins as cf_origins,
     CfnOutput,
     RemovalPolicy,
     Duration
@@ -42,25 +45,64 @@ class AsthmaGuardianV3Stack(Stack):
             removal_policy=RemovalPolicy.DESTROY
         )
         
-        # Create VPC
+        # Create VPC with enhanced security
         self.vpc = ec2.Vpc(
             self,
             "VPC",
             vpc_name="asthma-guardian-v3-vpc",
-            max_azs=2,
-            nat_gateways=1,
+            max_azs=3,  # Use 3 AZs for better availability
+            nat_gateways=2,  # Use 2 NAT gateways for high availability
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="Public",
                     subnet_type=ec2.SubnetType.PUBLIC,
-                    cidr_mask=24
+                    cidr_mask=24,
+                    map_public_ip_on_launch=False  # Don't auto-assign public IPs
                 ),
                 ec2.SubnetConfiguration(
                     name="Private",
                     subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
                     cidr_mask=24
+                ),
+                ec2.SubnetConfiguration(
+                    name="Database",
+                    subnet_type=ec2.SubnetType.PRIVATE_ISOLATED,
+                    cidr_mask=24
                 )
-            ]
+            ],
+            enable_dns_hostnames=True,
+            enable_dns_support=True
+        )
+        
+        # Create security groups
+        self.lambda_security_group = ec2.SecurityGroup(
+            self,
+            "LambdaSecurityGroup",
+            vpc=self.vpc,
+            description="Security group for Lambda functions",
+            allow_all_outbound=True
+        )
+        
+        self.api_security_group = ec2.SecurityGroup(
+            self,
+            "ApiSecurityGroup",
+            vpc=self.vpc,
+            description="Security group for API Gateway",
+            allow_all_outbound=True
+        )
+        
+        # Allow HTTPS traffic to API Gateway
+        self.api_security_group.add_ingress_rule(
+            peer=ec2.Peer.any_ipv4(),
+            connection=ec2.Port.tcp(443),
+            description="HTTPS traffic to API Gateway"
+        )
+        
+        # Allow Lambda to access DynamoDB and other AWS services
+        self.lambda_security_group.add_egress_rule(
+            peer=ec2.Peer.any_ipv4(),
+            connection=ec2.Port.tcp(443),
+            description="HTTPS outbound for AWS services"
         )
         
         # Create DynamoDB tables
@@ -175,7 +217,7 @@ class AsthmaGuardianV3Stack(Stack):
             )
         )
         
-        # Create Lambda execution role
+        # Create Lambda execution role with enhanced security
         self.lambda_execution_role = iam.Role(
             self,
             "LambdaExecutionRole",
@@ -184,6 +226,7 @@ class AsthmaGuardianV3Stack(Stack):
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaBasicExecutionRole"),
                 iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWSLambdaVPCAccessExecutionRole")
             ],
+            role_name="asthma-guardian-v3-lambda-execution-role",
             inline_policies={
                 "DynamoDBAccess": iam.PolicyDocument(
                     statements=[
@@ -237,6 +280,30 @@ class AsthmaGuardianV3Stack(Stack):
                             resources=["*"]
                         )
                     ]
+                ),
+                "KMSAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=["kms:Decrypt", "kms:GenerateDataKey"],
+                            resources=[self.kms_key.key_arn]
+                        )
+                    ]
+                ),
+                "CloudWatchLogsAccess": iam.PolicyDocument(
+                    statements=[
+                        iam.PolicyStatement(
+                            effect=iam.Effect.ALLOW,
+                            actions=[
+                                "logs:CreateLogGroup",
+                                "logs:CreateLogStream",
+                                "logs:PutLogEvents",
+                                "logs:DescribeLogGroups",
+                                "logs:DescribeLogStreams"
+                            ],
+                            resources=["arn:aws:logs:*:*:*"]
+                        )
+                    ]
                 )
             }
         )
@@ -254,7 +321,12 @@ class AsthmaGuardianV3Stack(Stack):
                 "AIR_QUALITY_TABLE_NAME": self.air_quality_table.table_name
             },
             timeout=Duration.seconds(30),
-            role=self.lambda_execution_role
+            role=self.lambda_execution_role,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[self.lambda_security_group],
+            dead_letter_queue_enabled=True,
+            tracing=lambda_.Tracing.ACTIVE
         )
         
         self.user_profile_lambda = lambda_.Function(
@@ -269,7 +341,12 @@ class AsthmaGuardianV3Stack(Stack):
                 "USERS_TABLE_NAME": self.users_table.table_name
             },
             timeout=Duration.seconds(30),
-            role=self.lambda_execution_role
+            role=self.lambda_execution_role,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[self.lambda_security_group],
+            dead_letter_queue_enabled=True,
+            tracing=lambda_.Tracing.ACTIVE
         )
         
         self.guidance_lambda = lambda_.Function(
@@ -286,7 +363,12 @@ class AsthmaGuardianV3Stack(Stack):
                 "GUIDANCE_TABLE_NAME": self.guidance_table.table_name
             },
             timeout=Duration.seconds(60),  # Longer timeout for Bedrock calls
-            role=self.lambda_execution_role
+            role=self.lambda_execution_role,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[self.lambda_security_group],
+            dead_letter_queue_enabled=True,
+            tracing=lambda_.Tracing.ACTIVE
         )
         
         self.notifications_lambda = lambda_.Function(
@@ -303,7 +385,12 @@ class AsthmaGuardianV3Stack(Stack):
                 "SES_FROM_EMAIL": "noreply@asthmaguardian.nsw.gov.au"
             },
             timeout=Duration.seconds(30),
-            role=self.lambda_execution_role
+            role=self.lambda_execution_role,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[self.lambda_security_group],
+            dead_letter_queue_enabled=True,
+            tracing=lambda_.Tracing.ACTIVE
         )
         
         self.data_ingestion_lambda = lambda_.Function(
@@ -320,7 +407,12 @@ class AsthmaGuardianV3Stack(Stack):
                 "BOM_API_URL": "https://api.bom.gov.au"
             },
             timeout=Duration.seconds(300),  # 5 minutes for data ingestion
-            role=self.lambda_execution_role
+            role=self.lambda_execution_role,
+            vpc=self.vpc,
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            security_groups=[self.lambda_security_group],
+            dead_letter_queue_enabled=True,
+            tracing=lambda_.Tracing.ACTIVE
         )
         
         # Create API Gateway
@@ -414,7 +506,83 @@ class AsthmaGuardianV3Stack(Stack):
             auto_delete_objects=True
         )
         
-        # Create CloudFront distribution
+        # Create WAF Web ACL for CloudFront
+        self.waf_web_acl = wafv2.CfnWebACL(
+            self,
+            "WAFWebACL",
+            name="asthma-guardian-v3-waf",
+            description="WAF Web ACL for Asthma Guardian v3",
+            scope="CLOUDFRONT",
+            default_action=wafv2.CfnWebACL.DefaultActionProperty(
+                allow=wafv2.CfnWebACL.AllowActionProperty()
+            ),
+            rules=[
+                # Rate limiting rule
+                wafv2.CfnWebACL.RuleProperty(
+                    name="RateLimitRule",
+                    priority=1,
+                    statement=wafv2.CfnWebACL.StatementProperty(
+                        rate_based_statement=wafv2.CfnWebACL.RateBasedStatementProperty(
+                            limit=2000,
+                            aggregate_key_type="IP"
+                        )
+                    ),
+                    action=wafv2.CfnWebACL.RuleActionProperty(
+                        block=wafv2.CfnWebACL.BlockActionProperty()
+                    ),
+                    visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                        sampled_requests_enabled=True,
+                        cloud_watch_metrics_enabled=True,
+                        metric_name="RateLimitRule"
+                    )
+                ),
+                # AWS Managed Rules for Core Rule Set
+                wafv2.CfnWebACL.RuleProperty(
+                    name="AWSManagedRulesCommonRuleSet",
+                    priority=2,
+                    override_action=wafv2.CfnWebACL.OverrideActionProperty(
+                        none={}
+                    ),
+                    statement=wafv2.CfnWebACL.StatementProperty(
+                        managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
+                            vendor_name="AWS",
+                            name="AWSManagedRulesCommonRuleSet"
+                        )
+                    ),
+                    visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                        sampled_requests_enabled=True,
+                        cloud_watch_metrics_enabled=True,
+                        metric_name="AWSManagedRulesCommonRuleSet"
+                    )
+                ),
+                # AWS Managed Rules for Known Bad Inputs
+                wafv2.CfnWebACL.RuleProperty(
+                    name="AWSManagedRulesKnownBadInputsRuleSet",
+                    priority=3,
+                    override_action=wafv2.CfnWebACL.OverrideActionProperty(
+                        none={}
+                    ),
+                    statement=wafv2.CfnWebACL.StatementProperty(
+                        managed_rule_group_statement=wafv2.CfnWebACL.ManagedRuleGroupStatementProperty(
+                            vendor_name="AWS",
+                            name="AWSManagedRulesKnownBadInputsRuleSet"
+                        )
+                    ),
+                    visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                        sampled_requests_enabled=True,
+                        cloud_watch_metrics_enabled=True,
+                        metric_name="AWSManagedRulesKnownBadInputsRuleSet"
+                    )
+                )
+            ],
+            visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
+                sampled_requests_enabled=True,
+                cloud_watch_metrics_enabled=True,
+                metric_name="AsthmaGuardianV3WAF"
+            )
+        )
+
+        # Create CloudFront distribution with WAF
         self.distribution = cloudfront.Distribution(
             self,
             "WebsiteDistribution",
@@ -453,12 +621,62 @@ class AsthmaGuardianV3Stack(Stack):
             ]
         )
         
-        # Create CloudWatch log groups
+        # Associate WAF with CloudFront distribution
+        wafv2.CfnWebACLAssociation(
+            self,
+            "WAFWebACLAssociation",
+            resource_arn=f"arn:aws:cloudfront::{self.account}:distribution/{self.distribution.distribution_id}",
+            web_acl_arn=self.waf_web_acl.attr_arn
+        )
+        
+        # Create CloudWatch log groups with enhanced monitoring
         self.api_log_group = logs.LogGroup(
             self,
             "ApiLogGroup",
             log_group_name="/aws/apigateway/asthma-guardian-v3-api",
-            retention=logs.RetentionDays.ONE_MONTH
+            retention=logs.RetentionDays.THREE_MONTHS,
+            encryption_key=self.kms_key
+        )
+        
+        # Create specific log groups for each Lambda function
+        self.air_quality_log_group = logs.LogGroup(
+            self,
+            "AirQualityLogGroup",
+            log_group_name="/aws/lambda/asthma-guardian-v3-air-quality",
+            retention=logs.RetentionDays.ONE_MONTH,
+            encryption_key=self.kms_key
+        )
+        
+        self.user_profile_log_group = logs.LogGroup(
+            self,
+            "UserProfileLogGroup",
+            log_group_name="/aws/lambda/asthma-guardian-v3-user-profile",
+            retention=logs.RetentionDays.ONE_MONTH,
+            encryption_key=self.kms_key
+        )
+        
+        self.guidance_log_group = logs.LogGroup(
+            self,
+            "GuidanceLogGroup",
+            log_group_name="/aws/lambda/asthma-guardian-v3-guidance",
+            retention=logs.RetentionDays.ONE_MONTH,
+            encryption_key=self.kms_key
+        )
+        
+        self.notifications_log_group = logs.LogGroup(
+            self,
+            "NotificationsLogGroup",
+            log_group_name="/aws/lambda/asthma-guardian-v3-notifications",
+            retention=logs.RetentionDays.ONE_MONTH,
+            encryption_key=self.kms_key
+        )
+        
+        self.data_ingestion_log_group = logs.LogGroup(
+            self,
+            "DataIngestionLogGroup",
+            log_group_name="/aws/lambda/asthma-guardian-v3-data-ingestion",
+            retention=logs.RetentionDays.ONE_MONTH,
+            encryption_key=self.kms_key
         )
         
         # Create SNS topic for alerts
@@ -468,6 +686,9 @@ class AsthmaGuardianV3Stack(Stack):
             topic_name="asthma-guardian-v3-alerts",
             display_name="Asthma Guardian v3 Alerts"
         )
+        
+        # Create CloudWatch alarms
+        self.create_cloudwatch_alarms()
         
         # Create CloudWatch dashboard
         self.dashboard = cloudwatch.Dashboard(
@@ -526,6 +747,111 @@ class AsthmaGuardianV3Stack(Stack):
             value=self.website_bucket.bucket_name,
             description="Name of the S3 bucket for website hosting"
         )
+    
+    def create_cloudwatch_alarms(self):
+        """Create CloudWatch alarms for monitoring and alerting."""
+        
+        # Lambda error rate alarm
+        self.lambda_error_alarm = cloudwatch.Alarm(
+            self,
+            "LambdaErrorAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/Lambda",
+                metric_name="Errors",
+                dimensions_map={
+                    "FunctionName": self.air_quality_lambda.function_name
+                }
+            ),
+            threshold=5,
+            evaluation_periods=2,
+            alarm_description="Lambda function error rate is high"
+        )
+        self.lambda_error_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        
+        # Lambda duration alarm
+        self.lambda_duration_alarm = cloudwatch.Alarm(
+            self,
+            "LambdaDurationAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/Lambda",
+                metric_name="Duration",
+                dimensions_map={
+                    "FunctionName": self.air_quality_lambda.function_name
+                }
+            ),
+            threshold=30000,  # 30 seconds
+            evaluation_periods=2,
+            alarm_description="Lambda function duration is high"
+        )
+        self.lambda_duration_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        
+        # API Gateway 4XX error alarm
+        self.api_4xx_alarm = cloudwatch.Alarm(
+            self,
+            "Api4XXAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/ApiGateway",
+                metric_name="4XXError",
+                dimensions_map={
+                    "ApiName": self.api.rest_api_name
+                }
+            ),
+            threshold=10,
+            evaluation_periods=2,
+            alarm_description="API Gateway 4XX error rate is high"
+        )
+        self.api_4xx_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        
+        # API Gateway 5XX error alarm
+        self.api_5xx_alarm = cloudwatch.Alarm(
+            self,
+            "Api5XXAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/ApiGateway",
+                metric_name="5XXError",
+                dimensions_map={
+                    "ApiName": self.api.rest_api_name
+                }
+            ),
+            threshold=5,
+            evaluation_periods=1,
+            alarm_description="API Gateway 5XX error rate is high"
+        )
+        self.api_5xx_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        
+        # DynamoDB throttled requests alarm
+        self.dynamodb_throttle_alarm = cloudwatch.Alarm(
+            self,
+            "DynamoDBThrottleAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/DynamoDB",
+                metric_name="ThrottledRequests",
+                dimensions_map={
+                    "TableName": self.users_table.table_name
+                }
+            ),
+            threshold=1,
+            evaluation_periods=1,
+            alarm_description="DynamoDB throttled requests detected"
+        )
+        self.dynamodb_throttle_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
+        
+        # CloudFront error rate alarm
+        self.cloudfront_error_alarm = cloudwatch.Alarm(
+            self,
+            "CloudFrontErrorAlarm",
+            metric=cloudwatch.Metric(
+                namespace="AWS/CloudFront",
+                metric_name="4xxErrorRate",
+                dimensions_map={
+                    "DistributionId": self.distribution.distribution_id
+                }
+            ),
+            threshold=5,
+            evaluation_periods=2,
+            alarm_description="CloudFront error rate is high"
+        )
+        self.cloudfront_error_alarm.add_alarm_action(cloudwatch_actions.SnsAction(self.alerts_topic))
 
 
 def main():
