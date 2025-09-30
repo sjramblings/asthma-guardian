@@ -1,50 +1,85 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report:
+Version change: N/A → 1.0.0
+Modified principles: N/A (initial creation)
+Added sections: All core principles and governance
+Removed sections: N/A
+Templates requiring updates: ✅ updated (plan-template.md, spec-template.md, tasks-template.md, commands/*.md)
+Follow-up TODOs: None
+-->
+
+# Asthma Guardian v3 Constitution
+
+**Version:** 1.0.0  
+**Ratified:** 2024-12-19  
+**Last Amended:** 2024-12-19
+
+## Purpose
+
+This constitution establishes the fundamental principles, governance structure, and development standards for Asthma Guardian v3. It serves as the foundational document that guides all technical decisions, architectural choices, and development practices within this project.
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### Clear Purpose & Focus
+Good coding projects start with a clear purpose and focus on delivering the simplest version that works before scaling.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+**Rationale:** A well-defined purpose prevents scope creep and ensures all development efforts align with core objectives. Starting simple allows for rapid validation and iterative improvement.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### Readable & Well-Documented Code
+Code should be readable, well-documented, and tested so it's easy to maintain and extend as requirements change.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+**Rationale:** Readable code reduces cognitive load and accelerates development. Documentation and tests serve as living specifications that enable confident refactoring and feature additions.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### Automation & Tool Reuse
+Automate repetitive tasks and use existing tools where possible.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+**Rationale:** Automation reduces human error and frees developers to focus on high-value work. Leveraging proven tools accelerates development and reduces maintenance burden.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### Security & Privacy by Design
+Build with security and privacy in mind from day one.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+**Rationale:** Security and privacy are foundational requirements that become exponentially more expensive to retrofit. Early consideration prevents technical debt and protects users.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### Measurement & Observation
+Measure and observe your system so you can learn from real-world feedback and improve continuously.
+
+**Rationale:** Data-driven decisions lead to better outcomes. Observability enables proactive issue detection and informed optimization decisions.
+
+### Continuous Improvement
+Learn from real-world feedback and improve continuously.
+
+**Rationale:** Systems that adapt to changing requirements and user needs remain valuable over time. Continuous improvement prevents stagnation and technical obsolescence.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+### Amendment Procedure
+Constitution amendments require:
+1. Proposal submission with clear rationale
+2. Impact assessment on existing codebase and practices
+3. Review period of minimum 48 hours
+4. Approval by project maintainers
+5. Version increment according to semantic versioning
+6. Update of all dependent templates and documentation
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+### Versioning Policy
+- **MAJOR (X.0.0):** Backward incompatible governance/principle removals or redefinitions
+- **MINOR (X.Y.0):** New principle/section added or materially expanded guidance
+- **PATCH (X.Y.Z):** Clarifications, wording, typo fixes, non-semantic refinements
+
+### Compliance Review
+- Quarterly review of adherence to principles
+- Annual comprehensive constitution review
+- Immediate review triggered by significant project pivots
+- Documentation of compliance gaps and remediation plans
+
+## Implementation
+
+All project artifacts, including code, documentation, tests, and deployment configurations, MUST align with these principles. Violations should be addressed through:
+1. Immediate correction when possible
+2. Technical debt tracking for complex changes
+3. Process improvements to prevent future violations
+4. Team education and training as needed
+
+---
+
+*This constitution is a living document that evolves with the project while maintaining its core values and standards.*
